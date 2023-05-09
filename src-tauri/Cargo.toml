@@ -23,6 +23,7 @@ num-traits = "0.2"
 bincode = "1.3.3"
 thiserror = "1.0.40"
 log ="0.4.17"
+tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v1" }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
