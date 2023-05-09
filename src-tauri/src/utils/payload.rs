@@ -1,57 +1,62 @@
+//! Helps parsing data into bytes for passing in socket
+//!
+//! serialize - `(1 byte - status code)(4 bytes - content length)(content)`
+//!
+//! deserialize - `(4 bytes - content length)(content)`
+
 use tokio::{
-    io::{AsyncReadExt, BufReader},
+    io::{AsyncBufRead, AsyncReadExt, BufReader},
     net::tcp::ReadHalf,
 };
 
 use crate::utils::Error;
-use crate::{StatusCode, User};
+use crate::StatusCode;
 
-/// Helps parsing data into bytes for passing in socket
+/// Serializes data
 ///
 /// format - `(1 byte - status code)(4 bytes - content length)(content)`
-pub struct Payload<T>(pub StatusCode, pub T);
+pub fn serialize<S>(status_code: StatusCode, data: &S) -> Vec<u8>
+where
+    S: serde::Serialize,
+{
+    let data_bytes = bincode::serialize(data).unwrap();
 
-impl<'a> Payload<&'a User> {
-    /// Converts Payload with `User` into bytes
-    pub fn get(&self) -> Vec<u8> {
-        let Payload(status_code, user) = self;
-        let user_bytes = bincode::serialize(user).unwrap();
+    let content_len = data_bytes.len() as u32;
+    let mut serialized: Vec<u8> = Vec::with_capacity(content_len as usize + 5);
 
-        let content_len = user_bytes.len() as u32;
-        let mut data: Vec<u8> = Vec::with_capacity(content_len as usize + 5);
+    serialized.push(status_code as u8);
+    serialized.extend(content_len.to_be_bytes());
+    serialized.extend(data_bytes);
 
-        data.push(*status_code as u8);
-        data.extend(content_len.to_be_bytes());
-        data.extend(user_bytes);
-
-        data
-    }
+    serialized
 }
 
-/// Fns for easier payload reading
-///
 /// Assumes status code is already extracted
 ///
 /// Reads stream - `(content-length: 4 bytes)(content)`
-pub mod read_payload_content {
+pub async fn deserialize_to_bytes<T>(buff_reader: &mut T) -> Result<Vec<u8>, Error>
+where
+    T: AsyncBufRead + std::marker::Unpin,
+{
+    let content_len = buff_reader.read_u32().await?;
 
-    use super::*;
-    type ReadResult<T> = Result<T, Error>;
+    let mut content_buff: Vec<u8> = vec![0; content_len as usize];
+    buff_reader.read_exact(&mut content_buff).await?;
 
-    pub async fn to_bytes(buff_reader: &mut BufReader<ReadHalf<'_>>) -> ReadResult<Vec<u8>> {
-        let content_len = buff_reader.read_u32().await?;
+    Ok(content_buff)
+}
 
-        let mut content_buff: Vec<u8> = vec![0; content_len as usize];
-        buff_reader.read_exact(&mut content_buff).await?;
+/// Assumes status code is already extracted
+///
+/// Reads stream - `(content-length: 4 bytes)(content)`
+pub async fn deserialize<T, U>(buff_reader: &mut T) -> Result<U, Error>
+where
+    U: serde::de::DeserializeOwned,
+    T: AsyncBufRead + std::marker::Unpin,
+{
+    let data_bytes = deserialize_to_bytes(buff_reader).await?;
 
-        Ok(content_buff)
-    }
+    let data: U = bincode::deserialize(&data_bytes)?;
 
-    pub async fn to_user(buff_reader: &mut BufReader<ReadHalf<'_>>) -> ReadResult<User> {
-        let user_bytes = to_bytes(buff_reader).await?;
-
-        let user: User = bincode::deserialize(&user_bytes)?;
-
-        Ok(user)
-    }
+    Ok(data)
 }
