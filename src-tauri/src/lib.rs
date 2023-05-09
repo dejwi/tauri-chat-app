@@ -17,6 +17,12 @@ pub struct User {
     pub avatar_url: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Message {
+    pub user: User,
+    pub content: String,
+}
+
 #[repr(u8)]
 #[derive(FromPrimitive, Copy, Clone)]
 pub enum StatusCode {

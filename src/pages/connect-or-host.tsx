@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/tauri";
 import { useDataStore } from "../utils/data-store";
 
 const ConnectOrHostPage = () => {
@@ -10,28 +9,8 @@ const ConnectOrHostPage = () => {
     setUsername,
     username,
     host,
-    test_connect,
-  } = useDataStore(
-    ({
-      avatarUrl,
-      setAvatarUrl,
-      username,
-      setUsername,
-      port,
-      setPort,
-      host,
-      test_connect,
-    }) => ({
-      avatarUrl,
-      setAvatarUrl,
-      username,
-      setUsername,
-      port,
-      setPort,
-      host,
-      test_connect,
-    })
-  );
+    connect,
+  } = useDataStore();
 
   return (
     <div className="flex flex-col justify-center h-screen w-[17rem] m-[0_auto]">
@@ -66,7 +45,7 @@ const ConnectOrHostPage = () => {
 
       <div className="flex mt-4">
         <button
-          onClick={test_connect}
+          onClick={() => connect({ avatarUrl, username }, port)}
           className="btn btn-active btn-primary flex-1"
         >
           Join

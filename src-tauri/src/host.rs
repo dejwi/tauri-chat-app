@@ -1,21 +1,18 @@
 use std::net::SocketAddr;
 
-use crate::{StatusCode, User};
+use crate::{Message, StatusCode, User};
 
-use crate::utils::{read_payload_content, Error, Payload};
+use crate::utils::{payload, Error};
 use log::{error, info, warn};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::{
-        tcp::{ReadHalf, WriteHalf},
-        TcpListener, TcpStream,
-    },
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    net::{tcp::ReadHalf, TcpListener, TcpStream},
     sync::broadcast::{self, Receiver, Sender},
 };
 
 #[derive(Clone, Debug)]
 pub enum Bcdata {
-    Message(User, String),
+    Message(Message),
     UserConnected(User),
     UserDisconnected(User),
     UserList(Vec<User>),
@@ -25,7 +22,7 @@ pub enum Bcdata {
 impl Bcdata {
     fn get_status_code(&self) -> StatusCode {
         match self {
-            Bcdata::Message(_, _) => StatusCode::Message,
+            Bcdata::Message(_) => StatusCode::Message,
             Bcdata::AllMessages(_) => StatusCode::AllMessages,
             Bcdata::UserConnected(_) => StatusCode::UserConnected,
             Bcdata::UserDisconnected(_) => StatusCode::UserDisconnected,
@@ -85,22 +82,27 @@ async fn handle_connection(
         return Err(Error::Connection("Expected a initial connect data".into()));
     }
 
-    let user = read_payload_content::to_user(&mut reader).await?;
+    let user: User = payload::deserialize(&mut reader).await?;
     tx.send(Bcdata::UserConnected(user.clone())).unwrap();
 
     let mut status_buff = [0u8];
     loop {
         tokio::select! {
+        // Handle data received from other socket
           recived = rx.recv() => {
             match recived.unwrap() {
               Bcdata::UserConnected(user) => {
-                  let payload = Payload(StatusCode::UserConnected, &user);
-                  writer.write_all(&payload.get()).await?;
+                  let payload = payload::serialize(StatusCode::UserConnected, &user);
+                  writer.write_all(&payload).await?;
               }
               Bcdata::UserDisconnected(user) => {
-                let payload = Payload(StatusCode::UserDisconnected, &user);
-                writer.write_all(&payload.get()).await?;
-              }
+                let payload = payload::serialize(StatusCode::UserDisconnected, &user);
+                writer.write_all(&payload).await?;
+              },
+              Bcdata::Message(message) => {
+                let payload = payload::serialize(StatusCode::Message, &message);
+                writer.write_all(&payload).await?;
+              },
               _ => (),
           }
           }
@@ -112,7 +114,7 @@ async fn handle_connection(
             }
 
             let status_code = status_buff[0];
-            handle_data_stream(num::FromPrimitive::from_u8(status_code), &tx, &mut reader ).await?;
+            handle_client_stream(num::FromPrimitive::from_u8(status_code), &tx, &mut reader ).await?;
           }
         }
     }
@@ -120,18 +122,22 @@ async fn handle_connection(
     Ok(())
 }
 
-/// Handle data streamed from a client
-async fn handle_data_stream<'a>(
+/// Handles data streamed from a client
+async fn handle_client_stream<'a>(
     status_code: Option<StatusCode>,
     tx: &Sender<Bcdata>,
     buff_reader: &mut BufReader<ReadHalf<'_>>,
 ) -> Result<(), Error> {
     let status_code = status_code.ok_or(Error::InvalidStatusCode)?;
 
-    use StatusCode::*;
     match status_code {
-        UserConnected => {
+        StatusCode::UserConnected => {
             // clients shouldn't send this
+        }
+        StatusCode::Message => {
+            info!("Server recevied message");
+            let data: Message = payload::deserialize(buff_reader).await?;
+            tx.send(Bcdata::Message(data)).unwrap();
         }
         _ => (),
     }

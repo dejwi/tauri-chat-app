@@ -1,14 +1,19 @@
+use std::sync::{Arc, Mutex};
+
 use crate::{
-    utils::{read_payload_content, Error, Payload},
-    StatusCode, User,
+    utils::{payload, Error},
+    Message, StatusCode, User,
 };
+use log::info;
+use tauri::{Manager, Window};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
 
 #[tauri::command]
-pub async fn test_client_connect(
+pub async fn client_connect(
+    window: Window,
     port: u16,
     username: String,
     avatar_url: String,
@@ -24,11 +29,34 @@ pub async fn test_client_connect(
     };
 
     // Write initial connect data
-    let payload = Payload(StatusCode::InitialConnect, &user);
-    stream.write_all(&payload.get()).await?;
+    let init_bytes = payload::serialize(StatusCode::InitialConnect, &user);
+    stream.write_all(&init_bytes).await?;
 
-    let (reader, _writer) = stream.split();
+    let (reader, writer) = stream.into_split();
+    let writer = Arc::new(Mutex::new(writer));
     let mut buff_reader = BufReader::new(reader);
+
+    let writer2 = Arc::clone(&writer);
+    window.listen("send-message", move |event| {
+        let user = user.clone();
+        let mut writer = writer2.lock().unwrap();
+
+        // tauri::async_runtime::
+        tokio::task::block_in_place(move || {
+            tauri::async_runtime::handle().block_on(async {
+                if let Some(content) = event.payload() {
+                    let content = content.trim().trim_matches(|c| c == '"');
+                    info!("Recived send-message event with payload: {content}");
+                    let message = Message {
+                        user,
+                        content: content.into(),
+                    };
+                    let data_bytes = payload::serialize(StatusCode::Message, &message);
+                    writer.write_all(&data_bytes).await.unwrap();
+                }
+            });
+        });
+    });
 
     loop {
         let status_code = buff_reader.read_u8().await?;
@@ -38,9 +66,16 @@ pub async fn test_client_connect(
 
         match status_code {
             StatusCode::UserConnected => {
-                let user = read_payload_content::to_user(&mut buff_reader).await?;
+                let user: User = payload::deserialize(&mut buff_reader).await?;
 
-                println!("Client Recived info about new connected user: {:?}", user);
+                info!("Client received info about new connected user: {:?}", user);
+                window.emit_all("user-connected", user).unwrap();
+            }
+            StatusCode::Message => {
+                let message: Message = payload::deserialize(&mut buff_reader).await?;
+
+                info!("Client received message: {}", message.content);
+                window.emit_all("received-message", message).unwrap();
             }
             _ => {}
         }
