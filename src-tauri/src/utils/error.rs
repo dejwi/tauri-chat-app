@@ -1,7 +1,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    ReadingStream(#[from] std::io::Error),
+    TcpStream(#[from] std::io::Error),
 
     #[error(transparent)]
     ParsingData(#[from] Box<bincode::ErrorKind>),
