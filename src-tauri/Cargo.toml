@@ -22,6 +22,7 @@ num-derive = "0.3"
 num-traits = "0.2"
 bincode = "1.3.3"
 thiserror = "1.0.40"
+log ="0.4.17"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

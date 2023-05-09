@@ -2759,6 +2759,7 @@ name = "tauri-chat-app"
 version = "0.0.0"
 dependencies = [
  "bincode",
+ "log",
  "num",
  "num-derive",
  "num-traits",

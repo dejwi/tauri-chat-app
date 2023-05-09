@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 
 use crate::{StatusCode, User};
 
-use crate::utils::{read_payload_content, Payload};
-use tauri::http::status;
+use crate::utils::{read_payload_content, Error, Payload};
+use log::{error, info, warn};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{
@@ -35,29 +35,33 @@ impl Bcdata {
 }
 
 #[tauri::command]
-pub async fn host_server(port: u16) -> Result<(), String> {
+pub async fn host_server(port: u16) -> Result<(), Error> {
     let listener = TcpListener::bind(("localhost", port)).await.map_err(|e| {
-        eprintln!("Error starting server: {}", e.to_string());
-        "Couldn't start server"
+        error!("Error starting server: {}", e.to_string());
+        Error::Connection("Couldn't start server".into())
     })?;
 
-    println!("Started server on: localhost:{port}");
+    info!("Started server on: localhost:{port}");
 
     let (tx, _rx) = broadcast::channel::<Bcdata>(32);
 
     loop {
         match listener.accept().await {
             Ok((socket, addr)) => {
-                println!("Socket connected: {}", addr);
+                info!("Socket connected: {}", addr);
 
                 let tx = tx.clone();
                 let rx = tx.subscribe();
                 tokio::spawn(async move {
-                    handle_connection(socket, addr, tx, rx).await;
+                    handle_connection(socket, addr, tx, rx)
+                        .await
+                        .unwrap_or_else(|err| {
+                            error!("{err}");
+                        });
                 });
             }
             Err(e) => {
-                eprintln!("Error connecting user: {}", e.to_string());
+                warn!("Error connecting user: {}", e.to_string());
             }
         };
     }
@@ -70,51 +74,50 @@ async fn handle_connection(
     addr: SocketAddr,
     tx: Sender<Bcdata>,
     mut rx: Receiver<Bcdata>,
-) {
+) -> Result<(), Error> {
     let (reader, mut writer) = socket.split();
 
     let mut reader = BufReader::new(reader);
-    let mut status_buff = [0u8];
 
-    let status_code = reader.read_u8().await.unwrap();
+    // First read initial user data
+    let status_code = reader.read_u8().await?;
     if status_code != StatusCode::InitialConnect as u8 {
-        panic!("Expected a initial connect data");
+        return Err(Error::Connection("Expected a initial connect data".into()));
     }
 
-    let user = read_payload_content::to_user(&mut reader).await;
-    
-    println!("Deserialized connected user: {:?}", user);
+    let user = read_payload_content::to_user(&mut reader).await?;
     tx.send(Bcdata::UserConnected(user.clone())).unwrap();
 
+    let mut status_buff = [0u8];
     loop {
         tokio::select! {
           recived = rx.recv() => {
             match recived.unwrap() {
               Bcdata::UserConnected(user) => {
                   let payload = Payload(StatusCode::UserConnected, &user);
-                  writer.write_all(&payload.get()).await.unwrap();
+                  writer.write_all(&payload.get()).await?;
               }
               Bcdata::UserDisconnected(user) => {
                 let payload = Payload(StatusCode::UserDisconnected, &user);
-                writer.write_all(&payload.get()).await.unwrap();
+                writer.write_all(&payload.get()).await?;
               }
               _ => (),
           }
           }
           result = reader.read_exact(&mut status_buff) => {
             if result.unwrap_or(0) == 0 {
-              println!("Client disconnected: {}", addr);
+              info!("Client disconnected: {}", addr);
               tx.send(Bcdata::UserDisconnected(user)).unwrap();
               break;
             }
 
             let status_code = status_buff[0];
-            println!("Got status code: {}",status_code );
-
-            handle_data_stream(num::FromPrimitive::from_u8(status_code), &tx, &mut reader ).await.unwrap();
+            handle_data_stream(num::FromPrimitive::from_u8(status_code), &tx, &mut reader ).await?;
           }
         }
     }
+
+    Ok(())
 }
 
 /// Handle data streamed from a client
@@ -122,8 +125,8 @@ async fn handle_data_stream<'a>(
     status_code: Option<StatusCode>,
     tx: &Sender<Bcdata>,
     buff_reader: &mut BufReader<ReadHalf<'_>>,
-) -> Result<(), &'static str> {
-    let status_code = status_code.ok_or("Invalid status code")?;
+) -> Result<(), Error> {
+    let status_code = status_code.ok_or(Error::InvalidStatusCode)?;
 
     use StatusCode::*;
     match status_code {
