@@ -1,27 +1,19 @@
 import { Message, User } from "../utils/data-store";
 import Avatar from "./avatar";
 import clsx from "clsx";
-import { cva, VariantProps } from "class-variance-authority";
 import { motion } from "framer-motion";
 
-const userConnectionCva = cva(
-  "self-center py-1 px-4 rounded-sm flex items-center",
-  {
-    variants: {
-      type: {
-        connected: "bg-green-600",
-        disconnected: "bg-red-400",
-      },
-    },
-  }
-);
-
-interface UserConnectionProps extends VariantProps<typeof userConnectionCva> {
+interface UserConnectionProps {
   user: User;
+  type: "connected" | "disconnected";
 }
 export const ChatUserConnection = ({ type, user }: UserConnectionProps) => (
   <motion.div
-    className={userConnectionCva({ type })}
+    className={clsx(
+      "self-center py-1 px-4 rounded-sm flex items-center",
+      type === "connected" && "bg-green-600",
+      type === "disconnected" && "bg-red-400"
+    )}
     initial={{ scale: 0.6, y: 30 }}
     animate={{ scale: 1, y: 0 }}
   >

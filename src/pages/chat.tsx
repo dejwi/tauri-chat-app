@@ -10,8 +10,6 @@ const ChatPage = () => {
     sendMessage,
     chatLog,
     setNewMessageCallback,
-    userConnectedAction,
-    userDisconnectedAction,
     id: clientId,
   } = useDataStore();
   const [message, setMessage] = useState("");
@@ -20,7 +18,6 @@ const ChatPage = () => {
   useEffect(() => {
     setNewMessageCallback(() => {
       if (!chatLogRef.current) return;
-
       setTimeout(
         () =>
           chatLogRef.current?.scrollTo({

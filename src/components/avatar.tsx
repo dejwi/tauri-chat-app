@@ -1,20 +1,11 @@
-import { cva, VariantProps } from "class-variance-authority";
 import clsx from "clsx";
 import { User } from "../utils/data-store";
 
-const avatarCva = cva("bg-neutral-focus text-neutral-content rounded-full", {
-  variants: {
-    size: {
-      small: "text-xs w-8",
-      chat: "text-xs w-10",
-    },
-  },
-});
-
-interface Props extends VariantProps<typeof avatarCva> {
+interface Props {
   online?: boolean;
   user: User;
   chatImage?: boolean;
+  size: "small" | "chat";
 }
 
 const Avatar = ({ online, size, user, chatImage }: Props) => {
@@ -27,7 +18,13 @@ const Avatar = ({ online, size, user, chatImage }: Props) => {
         chatImage && "chat-image"
       )}
     >
-      <div className={avatarCva({ size })}>
+      <div
+        className={clsx(
+          "bg-neutral-focus text-neutral-content rounded-full text-xs",
+          size === "small" && "w-8",
+          size === "chat" && "w-10"
+        )}
+      >
         {user.avatar_url ? (
           <img src={user.avatar_url} />
         ) : (
