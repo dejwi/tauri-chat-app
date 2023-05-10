@@ -4,10 +4,7 @@
 //!
 //! deserialize - `(4 bytes - content length)(content)`
 
-use tokio::{
-    io::{AsyncBufRead, AsyncReadExt, BufReader},
-    net::tcp::ReadHalf,
-};
+use tokio::io::{AsyncBufRead, AsyncReadExt};
 
 use crate::utils::Error;
 use crate::StatusCode;
