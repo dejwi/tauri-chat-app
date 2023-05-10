@@ -44,7 +44,7 @@ pub async fn client_connect(
         let user = user.clone();
         let mut writer = writer2.lock().unwrap();
 
-        // tauri::async_runtime::
+        // goddamn
         tokio::task::block_in_place(move || {
             tauri::async_runtime::handle().block_on(async {
                 if let Some(content) = event.payload() {
