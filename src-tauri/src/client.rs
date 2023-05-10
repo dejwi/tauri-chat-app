@@ -2,9 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     utils::{payload, Error},
-    Message, StatusCode, User,
+    ChatLogEntry, Message, StatusCode, User,
 };
-use log::info;
+use log::{error, info};
 use tauri::{Manager, Window};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
@@ -27,6 +27,9 @@ pub async fn client_connect(
         username,
         avatar_url,
     };
+
+    // send id to front
+    window.emit_all("client-id", user.id).unwrap();
 
     // Write initial connect data
     let init_bytes = payload::serialize(StatusCode::InitialConnect, &user);
@@ -68,8 +71,14 @@ pub async fn client_connect(
             StatusCode::UserConnected => {
                 let user: User = payload::deserialize(&mut buff_reader).await?;
 
-                info!("Client received info about new connected user: {:?}", user);
+                info!("Received user connected: {:?}", user.username);
                 window.emit_all("user-connected", user).unwrap();
+            }
+            StatusCode::UserDisconnected => {
+                let user: User = payload::deserialize(&mut buff_reader).await?;
+
+                info!("Received user connected: {:?}", user.username);
+                window.emit_all("user-disconnected", user).unwrap();
             }
             StatusCode::Message => {
                 let message: Message = payload::deserialize(&mut buff_reader).await?;
@@ -77,9 +86,24 @@ pub async fn client_connect(
                 info!("Client received message: {}", message.content);
                 window.emit_all("received-message", message).unwrap();
             }
-            _ => {}
+            StatusCode::UserList => {
+                let users: Vec<User> = payload::deserialize(&mut buff_reader).await?;
+
+                info!("Received info about online users");
+                window.emit_all("set-online-users", users).unwrap();
+            }
+            StatusCode::ChatLog => {
+                let chat_log: Vec<ChatLogEntry> = payload::deserialize(&mut buff_reader).await?;
+
+                info!("Received chat log");
+                window.emit_all("set-chat-log", chat_log).unwrap();
+            }
+            _ => {
+                error!(
+                    "Server streamed status code that shouldn't be send or is unhandled {:?}",
+                    status_code
+                );
+            }
         }
     }
-
-    Ok(())
 }

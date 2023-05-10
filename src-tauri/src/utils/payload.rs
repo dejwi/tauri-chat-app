@@ -17,7 +17,7 @@ use crate::StatusCode;
 /// format - `(1 byte - status code)(4 bytes - content length)(content)`
 pub fn serialize<S>(status_code: StatusCode, data: &S) -> Vec<u8>
 where
-    S: serde::Serialize,
+    S: serde::Serialize + ?Sized,
 {
     let data_bytes = bincode::serialize(data).unwrap();
 

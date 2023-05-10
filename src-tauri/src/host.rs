@@ -1,12 +1,14 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
-use crate::{Message, StatusCode, User};
+use crate::{ChatLogEntry, Message, StatusCode, User};
 
 use crate::utils::{payload, Error};
 use log::{error, info, warn};
+use tokio::sync::Mutex;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
-    net::{tcp::ReadHalf, TcpListener, TcpStream},
+    net::{TcpListener, TcpStream},
     sync::broadcast::{self, Receiver, Sender},
 };
 
@@ -15,20 +17,6 @@ pub enum Bcdata {
     Message(Message),
     UserConnected(User),
     UserDisconnected(User),
-    UserList(Vec<User>),
-    AllMessages(Vec<(String, User)>),
-}
-
-impl Bcdata {
-    fn get_status_code(&self) -> StatusCode {
-        match self {
-            Bcdata::Message(_) => StatusCode::Message,
-            Bcdata::AllMessages(_) => StatusCode::AllMessages,
-            Bcdata::UserConnected(_) => StatusCode::UserConnected,
-            Bcdata::UserDisconnected(_) => StatusCode::UserDisconnected,
-            Bcdata::UserList(_) => StatusCode::UserList,
-        }
-    }
 }
 
 #[tauri::command]
@@ -41,6 +29,8 @@ pub async fn host_server(port: u16) -> Result<(), Error> {
     info!("Started server on: localhost:{port}");
 
     let (tx, _rx) = broadcast::channel::<Bcdata>(32);
+    let online_users = Arc::new(Mutex::new(Vec::<User>::new()));
+    let chat_log_entries = Arc::new(Mutex::new(Vec::<ChatLogEntry>::new()));
 
     loop {
         match listener.accept().await {
@@ -49,8 +39,10 @@ pub async fn host_server(port: u16) -> Result<(), Error> {
 
                 let tx = tx.clone();
                 let rx = tx.subscribe();
+                let online_users = Arc::clone(&online_users);
+                let chat_log_entries = Arc::clone(&chat_log_entries);
                 tokio::spawn(async move {
-                    handle_connection(socket, addr, tx, rx)
+                    handle_connection(socket, addr, tx, rx, online_users, chat_log_entries)
                         .await
                         .unwrap_or_else(|err| {
                             error!("{err}");
@@ -62,15 +54,21 @@ pub async fn host_server(port: u16) -> Result<(), Error> {
             }
         };
     }
-
-    Ok(())
 }
 
+/// Handles TCP connection with a socket and data passed from other sockets via broadcast
+///
+/// Performs a Initial setup
+/// 1. Reads streamed User initial data
+/// 2. Sends currently online users
+/// 3. Sends chatlog
 async fn handle_connection(
     mut socket: TcpStream,
     addr: SocketAddr,
     tx: Sender<Bcdata>,
     mut rx: Receiver<Bcdata>,
+    online_users: Arc<Mutex<Vec<User>>>,
+    chat_log_entries: Arc<Mutex<Vec<ChatLogEntry>>>,
 ) -> Result<(), Error> {
     let (reader, mut writer) = socket.split();
 
@@ -84,62 +82,83 @@ async fn handle_connection(
 
     let user: User = payload::deserialize(&mut reader).await?;
     tx.send(Bcdata::UserConnected(user.clone())).unwrap();
+    online_users.lock().await.push(user.clone());
+    chat_log_entries
+        .lock()
+        .await
+        .push(ChatLogEntry::connected(user.clone()));
+
+    // Send currently online users
+    writer
+        .write_all(&payload::serialize(
+            StatusCode::UserList,
+            &online_users.lock().await[..],
+        ))
+        .await?;
+
+    // Send chatlog
+    writer
+        .write_all(&payload::serialize(
+            StatusCode::ChatLog,
+            &chat_log_entries.lock().await[..],
+        ))
+        .await?;
 
     let mut status_buff = [0u8];
     loop {
         tokio::select! {
-        // Handle data received from other socket
+        // Handle data received from other sockets
           recived = rx.recv() => {
             match recived.unwrap() {
-              Bcdata::UserConnected(user) => {
-                  let payload = payload::serialize(StatusCode::UserConnected, &user);
-                  writer.write_all(&payload).await?;
+              Bcdata::UserConnected(user_connected) => {
+                if user.id != user_connected.id {
+                    let payload = payload::serialize(StatusCode::UserConnected, &user_connected);
+                    writer.write_all(&payload).await?;
+                }
               }
-              Bcdata::UserDisconnected(user) => {
-                let payload = payload::serialize(StatusCode::UserDisconnected, &user);
+              Bcdata::UserDisconnected(user_disconnected) => {
+                let payload = payload::serialize(StatusCode::UserDisconnected, &user_disconnected);
                 writer.write_all(&payload).await?;
               },
               Bcdata::Message(message) => {
                 let payload = payload::serialize(StatusCode::Message, &message);
                 writer.write_all(&payload).await?;
               },
-              _ => (),
           }
           }
+          // Data streamed from a client
           result = reader.read_exact(&mut status_buff) => {
             if result.unwrap_or(0) == 0 {
               info!("Client disconnected: {}", addr);
+
+              let mut locked_online_users = online_users.lock().await;
+              if let Some(pos) = locked_online_users.iter().position(|x| x.id == user.id) {
+                locked_online_users.remove(pos);
+              }
+              chat_log_entries.lock().await.push(ChatLogEntry::disconnected(user.clone()));
+
               tx.send(Bcdata::UserDisconnected(user)).unwrap();
               break;
             }
 
-            let status_code = status_buff[0];
-            handle_client_stream(num::FromPrimitive::from_u8(status_code), &tx, &mut reader ).await?;
+            let status_code = num::FromPrimitive::from_u8(status_buff[0]).ok_or(Error::InvalidStatusCode)?;
+
+            match status_code {
+                StatusCode::Message => {
+                    info!("Server recevied message");
+                    let message: Message = payload::deserialize(&mut reader).await?;
+                    tx.send(Bcdata::Message(message.clone())).unwrap();
+                    chat_log_entries
+                        .lock()
+                        .await
+                        .push(ChatLogEntry::message(message));
+                }
+                _ => {
+                    error!("Client streamed status code that shouldn't be send or is unhandled {:?}", status_code);
+                }
+            }
           }
         }
-    }
-
-    Ok(())
-}
-
-/// Handles data streamed from a client
-async fn handle_client_stream<'a>(
-    status_code: Option<StatusCode>,
-    tx: &Sender<Bcdata>,
-    buff_reader: &mut BufReader<ReadHalf<'_>>,
-) -> Result<(), Error> {
-    let status_code = status_code.ok_or(Error::InvalidStatusCode)?;
-
-    match status_code {
-        StatusCode::UserConnected => {
-            // clients shouldn't send this
-        }
-        StatusCode::Message => {
-            info!("Server recevied message");
-            let data: Message = payload::deserialize(buff_reader).await?;
-            tx.send(Bcdata::Message(data)).unwrap();
-        }
-        _ => (),
     }
 
     Ok(())
