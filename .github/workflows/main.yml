@@ -2,7 +2,7 @@ name: publish
 on:
   push:
     tags:
-      - 'app-v*'
+      - 'v*'
   workflow_dispatch:
 
 jobs:
