@@ -1,7 +1,5 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// #[macro_use]
-// extern crate log;
 
 use tauri_chat_app::client::{__cmd__client_connect, client_connect};
 use tauri_chat_app::host::{__cmd__host_server, host_server};
