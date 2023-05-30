@@ -1,7 +1,24 @@
-# Tauri + React + Typescript
+# Chat app created with Tauri
+Contains frontend, and client+server backend
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Based on handling raw bytes streamed on a TCP socket + handles 6 different payloades types encoded within the stream
 
-## Recommended IDE Setup
+# Features
+- handled in raw bytes
+- persistent chat log - server sends saved chat to the connected user
+- connected/disconnected announcements
+- username/avatar
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Stack
+Tauri
+
+Rust, tokio, serde
+
+Typescript, react, zustand, tailwindcss, daisyui, framer-motion
+
+## How to run
+Download already compiled version from [Releases](https://github.com/dejwi/tauri-chat-app/releases/tag/v1.0) (All platforms)
+
+## How to run in dev environment
+1. Make sure you have installed `Rust` and `Node`
+2. run `pnpm run tauri dev`
