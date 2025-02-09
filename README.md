@@ -12,12 +12,8 @@ Download already compiled version from [Releases](https://github.com/dejwi/tauri
 - username/avatar
 
 ## Preview
-https://github.com/dejwi/tauri-chat-app/assets/80927085/f985986b-06b1-4722-86c1-6b82093e0f8d
 
-
-
-
-
+<video src="https://github.com/dejwi/tauri-chat-app/assets/80927085/f985986b-06b1-4722-86c1-6b82093e0f8d"></video>
 
 ## How to run
 Download already compiled version from [Releases](https://github.com/dejwi/tauri-chat-app/releases/tag/v1.0) (All platforms)
